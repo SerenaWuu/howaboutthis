@@ -181,7 +181,7 @@ def select_date(page, d):
             break
         # Common next-month labels/icons.
         clicked = False
-        for pat in [r"next", r"next month", r"›", r">"]:
+        for pat in [r"next", r"next month", r"âº", r">"]:
             try:
                 loc = page.get_by_text(re.compile(pat, re.I)).filter(visible=True).last
                 if loc.count():
@@ -228,6 +228,36 @@ def select_date(page, d):
         except Exception:
             continue
     raise RuntimeError(f"Could not select release date {d.isoformat()}")
+
+def open_book_now(page):
+    """The logged-in PWA opens on Dashboard; Service cards are under BOOK NOW."""
+    body = visible_text(page)
+    if re.search(r"Step\s*1\s*of\s*3|^Service\s*$", body, re.I | re.M):
+        return True
+
+    logging.info("Opening BOOK NOW to reach Service step.")
+    for pat in [r"^book\s+now$", r"book\s+now"]:
+        try:
+            loc = page.get_by_text(re.compile(pat, re.I)).filter(visible=True).first
+            if loc.count():
+                loc.scroll_into_view_if_needed(timeout=3000)
+                loc.click(timeout=5000)
+                page.wait_for_timeout(1500)
+                return True
+        except Exception:
+            pass
+
+    try:
+        loc = page.locator("text=BOOK NOW").filter(visible=True).first
+        if loc.count():
+            loc.click(timeout=5000)
+            page.wait_for_timeout(1500)
+            return True
+    except Exception:
+        pass
+
+    page.screenshot(path="/tmp/mega_dashboard.png", full_page=True)
+    raise RuntimeError("Could not find BOOK NOW on the Mega Club dashboard.")
 
 def choose_service(page, sport):
     # Mega Club's PWA uses the exact service names shown on screen:
@@ -305,23 +335,92 @@ def continue_or_confirm(page):
     return False
 
 def agree_rules(page):
-    for sel in ['input[type="checkbox"]', '[role="checkbox"]']:
+    """Ensure ALL three Mega Club confirmation checkboxes are checked.
+
+    The confirmation screen has three required acknowledgements:
+    1) I understand the rules and regulations for my booking
+    2) GUEST Acknowledgment Of Risk and Waiver of Liability Use of MEGA CLUB
+    3) I agree with Mega Club Shared Facility Terms & Conditions
+    """
+    labels = [
+        r"I\s+understand\s+the\s+rules\s+and\s+regulations\s+for\s+my\s+booking",
+        r"GUEST\s+Acknowledgment\s+Of\s+Risk\s+and\s+Waiver\s+of\s+Liability\s+Use\s+of\s+MEGA\s+CLUB",
+        r"I\s+agree\s+with\s+Mega\s+Club\s+Shared\s+Facility\s+Terms\s*&\s*Conditions",
+    ]
+
+    checked_count = 0
+
+    # Prefer labels/text because the checkbox inputs can be visually detached
+    # from their text in the PWA. Clicking an unchecked label toggles its box.
+    for pattern in labels:
         try:
-            for el in page.locator(sel).filter(visible=True).all():
+            text_loc = page.get_by_text(re.compile(pattern, re.I)).filter(visible=True).first
+            if not text_loc.count() or not text_loc.is_visible():
+                logging.info("Required confirmation text not found: %s", pattern)
+                continue
+
+            text_loc.scroll_into_view_if_needed(timeout=3000)
+
+            # Try an associated input/checkbox inside the label/container first.
+            clicked = False
+            for xp in [
+                "xpath=ancestor::label[1]",
+                "xpath=ancestor::*[@role='checkbox'][1]",
+                "xpath=ancestor::*[.//input[@type='checkbox']][1]",
+            ]:
                 try:
-                    checked = el.is_checked()
+                    container = text_loc.locator(xp).first
+                    if container.count() and container.is_visible():
+                        cb = container.locator("input[type='checkbox'], [role='checkbox']").first
+                        if cb.count():
+                            try:
+                                if cb.is_checked():
+                                    checked_count += 1
+                                    clicked = True
+                                    break
+                            except Exception:
+                                pass
+                        container.click(timeout=3000)
+                        page.wait_for_timeout(300)
+                        clicked = True
+                        checked_count += 1
+                        break
                 except Exception:
-                    checked = False
-                if not checked:
-                    el.check()
-                    return True
+                    pass
+
+            if clicked:
+                continue
+
+            # Fallback: click the text itself; then inspect nearby checkboxes.
+            text_loc.click(timeout=3000)
+            page.wait_for_timeout(300)
+            checked_count += 1
         except Exception:
-            pass
-    # Text next to checkbox may be clickable.
-    return click_text(page, [r"agree", r"rules", r"terms"], timeout=2500)
+            logging.exception("Could not handle confirmation checkbox: %s", pattern)
+
+    # Final safety pass over actual checkbox elements. Only check boxes that are
+    # currently unchecked; never uncheck an already-selected acknowledgement.
+    try:
+        boxes = page.locator("input[type='checkbox'], [role='checkbox']").filter(visible=True)
+        for i in range(boxes.count()):
+            cb = boxes.nth(i)
+            try:
+                if not cb.is_checked():
+                    cb.check(force=True)
+            except Exception:
+                try:
+                    cb.click(force=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    logging.info("Processed Mega Club confirmation acknowledgements (3 required).")
+    return checked_count > 0
 
 def book_sport(page, sport, d):
     logging.info("Trying %s for %s", sport, d)
+    open_book_now(page)
     if not choose_service(page, sport):
         logging.info("%s service not found on page.", sport)
         return False
@@ -335,7 +434,7 @@ def book_sport(page, sport, d):
 
     logging.info("%s candidate selected: %s", sport, chosen)
     if DRY_RUN:
-        logging.info("DRY_RUN=true — stopping before final booking.")
+        logging.info("DRY_RUN=true â stopping before final booking.")
         return True
 
     continue_or_confirm(page)
@@ -365,7 +464,7 @@ def send_email(sport, d, chosen):
     import smtplib
     from email.message import EmailMessage
     msg = EmailMessage()
-    msg["Subject"] = f"✅ Mega Club booked — {sport} {d.isoformat()} {str(chosen)[:5]}"
+    msg["Subject"] = f"â Mega Club booked â {sport} {d.isoformat()} {str(chosen)[:5]}"
     msg["From"] = EMAIL_FROM
     msg["To"] = EMAIL_TO
     msg.set_content(
