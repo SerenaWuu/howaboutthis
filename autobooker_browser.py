@@ -230,35 +230,65 @@ def select_date(page, d):
     raise RuntimeError(f"Could not select release date {d.isoformat()}")
 
 def open_book_now(page):
-    """The logged-in PWA opens on Dashboard; Service cards are under BOOK NOW."""
-    body = visible_text(page)
-    if re.search(r"Step\s*1\s*of\s*3|^Service\s*$", body, re.I | re.M):
-        return True
+    logging.info("Opening BOOK NOW from Mega Club dashboard...")
 
-    logging.info("Opening BOOK NOW to reach Service step.")
-    for pat in [r"^book\s+now$", r"book\s+now"]:
+    # Wait for the dashboard to fully render
+    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_timeout(3000)
+
+    # Try several ways to find the BOOK NOW button/link
+    selectors = [
+        "text=BOOK NOW",
+        "text=Book Now",
+        "button:has-text('BOOK NOW')",
+        "button:has-text('Book Now')",
+        "a:has-text('BOOK NOW')",
+        "a:has-text('Book Now')",
+        "[role='button']:has-text('BOOK NOW')",
+        "[role='button']:has-text('Book Now')",
+    ]
+
+    for selector in selectors:
         try:
-            loc = page.get_by_text(re.compile(pat, re.I)).filter(visible=True).first
-            if loc.count():
-                loc.scroll_into_view_if_needed(timeout=3000)
-                loc.click(timeout=5000)
-                page.wait_for_timeout(1500)
-                return True
-        except Exception:
-            pass
+            locator = page.locator(selector).first
+            if await locator.count() > 0:
+                await locator.scroll_into_view_if_needed()
+                await locator.click(timeout=5000)
+                logging.info("BOOK NOW clicked using selector: %s", selector)
+                await page.wait_for_timeout(2500)
+                return
+        except Exception as e:
+            logging.debug("Selector failed %s: %s", selector, e)
 
+    # Fallback: search all visible elements by normalized text
+    elements = page.locator("button, a, [role='button'], div")
+    count = await elements.count()
+
+    for i in range(min(count, 300)):
+        try:
+            el = elements.nth(i)
+            if not await el.is_visible():
+                continue
+
+            text = (await el.inner_text()).strip().upper()
+
+            if "BOOK NOW" in text:
+                await el.scroll_into_view_if_needed()
+                await el.click(timeout=5000)
+                logging.info("BOOK NOW clicked using text fallback.")
+                await page.wait_for_timeout(2500)
+                return
+        except Exception:
+            continue
+
+    # Save screenshot for debugging if it still fails
     try:
-        loc = page.locator("text=BOOK NOW").filter(visible=True).first
-        if loc.count():
-            loc.click(timeout=5000)
-            page.wait_for_timeout(1500)
-            return True
+        await page.screenshot(path="/tmp/book_now_not_found.png", full_page=True)
     except Exception:
         pass
 
-    page.screenshot(path="/tmp/mega_dashboard.png", full_page=True)
     raise RuntimeError("Could not find BOOK NOW on the Mega Club dashboard.")
-
+    
 def choose_service(page, sport):
     # Mega Club's PWA uses the exact service names shown on screen:
     # "Badminton Court" and "Tennis Court".
