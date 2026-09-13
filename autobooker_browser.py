@@ -232,11 +232,9 @@ def select_date(page, d):
 async def open_book_now(page):
     logging.info("Opening BOOK NOW from Mega Club dashboard...")
 
-    # Wait for the dashboard to fully render
-    page.wait_for_load_state("domcontentloaded")
-    page.wait_for_timeout(3000)
+    await page.wait_for_load_state("domcontentloaded")
+    await page.wait_for_timeout(3000)
 
-    # Try several ways to find the BOOK NOW button/link
     selectors = [
         "text=BOOK NOW",
         "text=Book Now",
@@ -251,43 +249,74 @@ async def open_book_now(page):
     for selector in selectors:
         try:
             locator = page.locator(selector).first
-            if await locator.count() > 0:
-                await locator.scroll_into_view_if_needed()
-                await locator.click(timeout=5000)
-                logging.info("BOOK NOW clicked using selector: %s", selector)
-                await page.wait_for_timeout(2500)
-                return
-        except Exception as e:
-            logging.debug("Selector failed %s: %s", selector, e)
 
-    # Fallback: search all visible elements by normalized text
-    elements = page.locator("button, a, [role='button'], div")
-    count = await elements.count()
-
-    for i in range(min(count, 300)):
-        try:
-            el = elements.nth(i)
-            if not await el.is_visible():
+            if await locator.count() == 0:
                 continue
 
-            text = (await el.inner_text()).strip().upper()
+            if not await locator.is_visible():
+                continue
+
+            await locator.scroll_into_view_if_needed()
+            await locator.click(timeout=5000)
+
+            logging.info(
+                "BOOK NOW clicked successfully: %s",
+                selector
+            )
+
+            await page.wait_for_timeout(2500)
+            return True
+
+        except Exception as e:
+            logging.debug(
+                "BOOK NOW selector failed: %s | %s",
+                selector,
+                e
+            )
+
+    # Fallback: inspect visible buttons/links
+    elements = page.locator(
+        "button, a, [role='button']"
+    )
+
+    count = await elements.count()
+
+    for i in range(count):
+        try:
+            element = elements.nth(i)
+
+            if not await element.is_visible():
+                continue
+
+            text = (await element.inner_text()).strip().upper()
 
             if "BOOK NOW" in text:
-                await el.scroll_into_view_if_needed()
-                await el.click(timeout=5000)
-                logging.info("BOOK NOW clicked using text fallback.")
+                await element.scroll_into_view_if_needed()
+                await element.click(timeout=5000)
+
+                logging.info(
+                    "BOOK NOW clicked using fallback text search."
+                )
+
                 await page.wait_for_timeout(2500)
-                return
+                return True
+
         except Exception:
             continue
 
-    # Save screenshot for debugging if it still fails
     try:
-        await page.screenshot(path="/tmp/book_now_not_found.png", full_page=True)
+        await page.screenshot(
+            path="/tmp/book_now_not_found.png",
+            full_page=True
+        )
     except Exception:
         pass
 
-    raise RuntimeError("Could not find BOOK NOW on the Mega Club dashboard.")
+    raise RuntimeError(
+        "Could not find BOOK NOW on the Mega Club dashboard."
+    )
+
+    
     
 def choose_service(page, sport):
     # Mega Club's PWA uses the exact service names shown on screen:
