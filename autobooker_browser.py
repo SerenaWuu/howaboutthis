@@ -92,7 +92,7 @@ logging.basicConfig(
 
 
 # ============================================================
-# Basic helpers
+# Helpers
 # ============================================================
 
 def visible_text(page):
@@ -197,7 +197,6 @@ def login(page):
 
     page.wait_for_timeout(3000)
 
-    # Cookie / consent buttons
     click_text(
         page,
         [
@@ -210,7 +209,6 @@ def login(page):
 
     body = visible_text(page)
 
-    # Already logged in
     if re.search(
         r"log\s*out|sign\s*out|my\s+account|my\s+bookings",
         body,
@@ -221,7 +219,6 @@ def login(page):
         )
         return
 
-    # Open login
     click_text(
         page,
         [
@@ -235,7 +232,6 @@ def login(page):
 
     page.wait_for_timeout(1500)
 
-    # Username / email
     user_ok = fill_first(
         page,
         [
@@ -249,7 +245,6 @@ def login(page):
         LOGIN
     )
 
-    # Password
     pass_ok = fill_first(
         page,
         [
@@ -271,7 +266,6 @@ def login(page):
             "Screenshot saved to /tmp/mega_login_fields.png"
         )
 
-    # Submit login
     if not click_text(
         page,
         [
@@ -317,17 +311,11 @@ def login(page):
 # ============================================================
 
 def target_window(d):
-    """
-    Weekdays:
-        19:00 - 22:00
-
-    Weekends:
-        12:00 - 22:00
-    """
-
+    # Monday-Friday: 19:00-22:00
     if d.weekday() < 5:
         return ("19:00", "22:00")
 
+    # Saturday-Sunday: 12:00-22:00
     return ("12:00", "22:00")
 
 
@@ -357,15 +345,13 @@ def open_book_now(page):
     We must click BOOK NOW before looking for
     Badminton Court / Tennis Court.
 
-    IMPORTANT:
     This project uses Playwright SYNC API.
-    Therefore this function MUST NOT be async
-    and MUST NOT use await.
+    No async / await is used.
     """
 
     body = visible_text(page)
 
-    # Already on booking/service page
+    # Already on Service step
     if re.search(
         r"Step\s*1\s*of\s*3|^\s*Service\s*$",
         body,
@@ -391,7 +377,7 @@ def open_book_now(page):
         "[role='button']:has-text('Book Now')",
     ]
 
-    # First attempt: direct selectors
+    # Direct selectors
     for selector in selectors:
         try:
             locator = page.locator(
@@ -428,7 +414,7 @@ def open_book_now(page):
                 e
             )
 
-    # Second attempt: inspect buttons / links
+    # Fallback: inspect buttons / links
     elements = page.locator(
         "button, a, [role='button']"
     )
@@ -473,7 +459,6 @@ def open_book_now(page):
     except Exception:
         pass
 
-    # Failed
     try:
         page.screenshot(
             path="/tmp/mega_dashboard.png",
@@ -729,7 +714,6 @@ def select_date(page, d):
 
         clicked = False
 
-        # Try next text
         for pat in [
             r"next",
             r"next month",
@@ -767,7 +751,6 @@ def select_date(page, d):
             except Exception:
                 pass
 
-        # Try aria/title
         if not clicked:
 
             for attr in [
@@ -803,7 +786,6 @@ def select_date(page, d):
         if not clicked:
             break
 
-    # Find day
     day = str(d.day)
 
     candidates = []
@@ -1106,8 +1088,7 @@ def agree_rules(page):
                 pattern
             )
 
-    # Safety fallback:
-    # check any visible unchecked checkbox
+    # Safety fallback
     try:
 
         boxes = (
@@ -1207,10 +1188,7 @@ def book_sport(page, sport, d):
         chosen
     )
 
-    # ========================================================
-    # TEST MODE
-    # ========================================================
-
+    # Test mode
     if DRY_RUN:
 
         logging.info(
@@ -1219,20 +1197,14 @@ def book_sport(page, sport, d):
 
         return True
 
-    # ========================================================
     # Continue to confirmation
-    # ========================================================
-
     continue_or_confirm(page)
 
     page.wait_for_timeout(
         800
     )
 
-    # ========================================================
-    # Check all 3 required acknowledgements
-    # ========================================================
-
+    # All 3 required acknowledgements
     agree_rules(page)
 
     continue_or_confirm(page)
@@ -1241,10 +1213,7 @@ def book_sport(page, sport, d):
         1200
     )
 
-    # ========================================================
     # Final confirmation
-    # ========================================================
-
     if click_text(
         page,
         [
@@ -1260,10 +1229,7 @@ def book_sport(page, sport, d):
             1800
         )
 
-    # ========================================================
     # Verify booking
-    # ========================================================
-
     body = visible_text(page)
 
     if re.search(
@@ -1357,9 +1323,7 @@ def send_email(
             SMTP_PASSWORD
         )
 
-        smtp.send_message(
-            msg
-        )
+        smtp.send_message(msg)
 
     logging.info(
         "Success email sent to %s",
@@ -1386,8 +1350,7 @@ def main():
 
     else:
 
-        # Target newly released date:
-        # today + 7 days
+        # Today + 7 days
         d = (
             datetime
             .now(TZ)
@@ -1400,12 +1363,12 @@ def main():
         d
     )
 
-    # Badminton only available:
+    # Badminton:
     # Monday / Friday / Saturday / Sunday
     #
     # Priority:
-    # 1. Badminton
-    # 2. Tennis
+    # Badminton first
+    # Tennis second
     #
     # Other days:
     # Tennis only
@@ -1450,7 +1413,7 @@ def main():
 
         try:
 
-            # Login once
+            # Login
             login(page)
 
             # Try sports in priority order
@@ -1464,7 +1427,7 @@ def main():
                         d
                     )
 
-                    # Successful candidate
+                    # Successful booking / dry-run candidate
                     if result:
 
                         if not DRY_RUN:
@@ -1490,7 +1453,7 @@ def main():
                         sport
                     )
 
-                    # Reload and login before next sport
+                    # Reset page before next sport
                     try:
 
                         page.goto(
