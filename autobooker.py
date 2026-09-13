@@ -2,6 +2,7 @@ import os, json, time, smtplib, logging
 from datetime import datetime, date, timedelta
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo
+from pathlib import Path
 import requests
 
 TZ = ZoneInfo(os.getenv("TIMEZONE", "America/Toronto"))
