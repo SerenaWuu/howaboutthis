@@ -229,7 +229,7 @@ def select_date(page, d):
             continue
     raise RuntimeError(f"Could not select release date {d.isoformat()}")
 
-def open_book_now(page):
+async def open_book_now(page):
     logging.info("Opening BOOK NOW from Mega Club dashboard...")
 
     # Wait for the dashboard to fully render
