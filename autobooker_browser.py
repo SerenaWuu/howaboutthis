@@ -230,15 +230,72 @@ def select_date(page, d):
     raise RuntimeError(f"Could not select release date {d.isoformat()}")
 
 def choose_service(page, sport):
-    pattern = r"badminton\s*court" if sport == "Badminton" else r"tennis\s*court|tennis"
-    if not click_text(page, [pattern], timeout=5000):
-        # Sometimes the service is a card with an exact title.
-        loc = page.get_by_text(re.compile(pattern, re.I)).filter(visible=True).first
-        if not loc.count():
-            return False
-        loc.click()
-    page.wait_for_timeout(1200)
-    return True
+    # Mega Club's PWA uses the exact service names shown on screen:
+    # "Badminton Court" and "Tennis Court".
+    service_name = "Badminton Court" if sport == "Badminton" else "Tennis Court"
+    logging.info("Looking for exact service: %s", service_name)
+
+    # Wait briefly for the Service step/cards to finish rendering.
+    try:
+        page.get_by_text(service_name, exact=True).first.wait_for(state="visible", timeout=10000)
+    except Exception:
+        pass
+
+    # First try exact text. Do NOT rely on the text being the clickable element:
+    # in this PWA the blue arrow/card is the clickable area.
+    locators = [
+        page.get_by_text(service_name, exact=True).first,
+        page.locator(f'text="{service_name}"').first,
+        page.locator("body").get_by_text(service_name, exact=True).first,
+    ]
+
+    for loc in locators:
+        try:
+            if not loc.is_visible():
+                continue
+            loc.scroll_into_view_if_needed(timeout=3000)
+
+            # Click the text itself first.
+            try:
+                loc.click(timeout=4000)
+                page.wait_for_timeout(1200)
+                logging.info("Selected service: %s", service_name)
+                return True
+            except Exception:
+                pass
+
+            # Then walk up to likely clickable containers.
+            for xp in [
+                "xpath=ancestor::*[@role='button'][1]",
+                "xpath=ancestor::button[1]",
+                "xpath=ancestor::*[contains(@class,'service')][1]",
+                "xpath=ancestor::*[contains(@class,'item')][1]",
+                "xpath=ancestor::*[contains(@class,'card')][1]",
+                "xpath=..",
+                "xpath=../..",
+            ]:
+                try:
+                    parent = loc.locator(xp).first
+                    if parent.count() and parent.is_visible():
+                        parent.scroll_into_view_if_needed(timeout=2000)
+                        parent.click(timeout=4000)
+                        page.wait_for_timeout(1200)
+                        logging.info("Selected service card: %s", service_name)
+                        return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # Diagnostic: the text may be rendered inside an iframe or after a delayed
+    # Angular/React update. Log whether it exists anywhere in the DOM.
+    body = visible_text(page)
+    if service_name.lower() in body.lower():
+        logging.info("Service text IS present in page body but could not be clicked: %s", service_name)
+    else:
+        logging.info("Service text is NOT present in current page body: %s", service_name)
+    page.screenshot(path=f"/tmp/mega_service_{sport.lower()}.png", full_page=True)
+    return False
 
 def continue_or_confirm(page):
     for pat in [r"continue", r"next", r"book", r"reserve", r"confirm", r"make\s+booking"]:
@@ -251,7 +308,11 @@ def agree_rules(page):
     for sel in ['input[type="checkbox"]', '[role="checkbox"]']:
         try:
             for el in page.locator(sel).filter(visible=True).all():
-                if not el.is_checked() if hasattr(el, "is_checked") else True:
+                try:
+                    checked = el.is_checked()
+                except Exception:
+                    checked = False
+                if not checked:
                     el.check()
                     return True
         except Exception:
